@@ -371,7 +371,7 @@ export function MCPManager({ onProviderChange, onStatusUpdate }: MCPManagerProps
                 <strong>MCP Active:</strong> {connectedProviders.length} provider(s) connected
                 {autoFallback && " • Auto-fallback enabled"}
               </>
-            ) : (\
+            ) : (
               <strong>No MCP Providers:</strong> Click scan to find available providers
             )}
           </AlertDescription>

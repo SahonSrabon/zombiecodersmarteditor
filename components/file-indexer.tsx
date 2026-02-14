@@ -389,4 +389,3 @@ export function FileIndexer({ onIndexUpdate, onStatusUpdate }: FileIndexerProps)
 }
 
 export default FileIndexer
-\

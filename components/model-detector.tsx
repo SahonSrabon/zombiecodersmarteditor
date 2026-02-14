@@ -453,7 +453,7 @@ export function ModelDetector({ onModelChange, onStatusUpdate }: ModelDetectorPr
                 <strong>Models Ready:</strong> {availableModels.length} available
                 {bengaliModels.length > 0 && ` • ${bengaliModels.length} with Bengali support`}
               </>
-            ) : (\
+            ) : (
               <strong>No Models:</strong> Click scan to detect available AI models
             )}
           </AlertDescription>
