@@ -8,257 +8,180 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Server, Wifi, WifiOff, CheckCircle, XCircle, RefreshCw, Globe, Clock, Activity } from "lucide-react"
+import { Server, Wifi, WifiOff, RefreshCw, CheckCircle, XCircle, Globe, Zap, Database } from "lucide-react"
 
 interface MCPProvider {
   id: string
   name: string
-  type: "local" | "remote" | "cloud"
-  endpoint: string
-  status: "connected" | "disconnected" | "connecting" | "error"
-  capabilities: string[]
+  type: "local" | "cloud" | "hybrid"
+  status: "connected" | "disconnected" | "error" | "connecting"
   latency: number
-  lastPing: Date
-  version: string
-  priority: number
-  fallbackOrder: number
+  capabilities: string[]
+  modelPath?: string
+  apiEndpoint?: string
+  description: string
 }
 
 interface MCPManagerProps {
-  onProviderChange: (provider: MCPProvider | null) => void
-  onStatusUpdate: (message: string) => void
+  onProviderChange?: (providerId: string | null) => void
+  onStatusUpdate?: (message: string) => void
 }
 
 export function MCPManager({ onProviderChange, onStatusUpdate }: MCPManagerProps) {
-  const [providers, setProviders] = useState<MCPProvider[]>([
-    {
-      id: "zombiecoder-local",
-      name: "ZombieCoder Local",
-      type: "local",
-      endpoint: "http://localhost:8080/mcp",
-      status: "disconnected",
-      capabilities: ["code-analysis", "bengali-processing", "voice-commands", "file-indexing"],
-      latency: 0,
-      lastPing: new Date(),
-      version: "1.0.0",
-      priority: 1,
-      fallbackOrder: 1,
-    },
-    {
-      id: "ollama-local",
-      name: "Ollama Local",
-      type: "local",
-      endpoint: "http://localhost:11434/api",
-      status: "disconnected",
-      capabilities: ["text-generation", "code-completion", "translation"],
-      latency: 0,
-      lastPing: new Date(),
-      version: "0.1.0",
-      priority: 2,
-      fallbackOrder: 2,
-    },
-    {
-      id: "lmstudio-local",
-      name: "LM Studio",
-      type: "local",
-      endpoint: "http://localhost:1234/v1",
-      status: "disconnected",
-      capabilities: ["text-generation", "code-completion"],
-      latency: 0,
-      lastPing: new Date(),
-      version: "0.2.0",
-      priority: 3,
-      fallbackOrder: 3,
-    },
-    {
-      id: "openai-cloud",
-      name: "OpenAI GPT",
-      type: "cloud",
-      endpoint: "https://api.openai.com/v1",
-      status: "disconnected",
-      capabilities: ["text-generation", "code-completion", "translation", "analysis"],
-      latency: 0,
-      lastPing: new Date(),
-      version: "4.0",
-      priority: 4,
-      fallbackOrder: 4,
-    },
-  ])
-
-  const [activeProvider, setActiveProvider] = useState<MCPProvider | null>(null)
+  const [providers, setProviders] = useState<MCPProvider[]>([])
+  const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [isScanning, setIsScanning] = useState(false)
   const [autoFallback, setAutoFallback] = useState(true)
-  const [connectionTimeout, setConnectionTimeout] = useState(5000)
-  const [retryAttempts, setRetryAttempts] = useState(3)
 
-  // Test connection to a provider
-  const testConnection = useCallback(
-    async (provider: MCPProvider): Promise<boolean> => {
-      const startTime = Date.now()
+  // Initialize providers
+  useEffect(() => {
+    const initialProviders: MCPProvider[] = [
+      {
+        id: "zombiecoder-local",
+        name: "ZombieCoder Local",
+        type: "local",
+        status: "disconnected",
+        latency: 0,
+        capabilities: ["code-generation", "bengali-support", "voice-commands"],
+        modelPath: "localhost:5000",
+        description: "Local ZombieCoder AI server",
+      },
+      {
+        id: "ollama",
+        name: "Ollama",
+        type: "local",
+        status: "disconnected",
+        latency: 0,
+        capabilities: ["code-generation", "chat", "completion"],
+        modelPath: "localhost:11434",
+        description: "Local Ollama server",
+      },
+      {
+        id: "lm-studio",
+        name: "LM Studio",
+        type: "local",
+        status: "disconnected",
+        latency: 0,
+        capabilities: ["code-generation", "chat"],
+        modelPath: "localhost:1234",
+        description: "LM Studio local server",
+      },
+      {
+        id: "openai-fallback",
+        name: "OpenAI Fallback",
+        type: "cloud",
+        status: "disconnected",
+        latency: 0,
+        capabilities: ["code-generation", "chat", "completion"],
+        apiEndpoint: "https://api.openai.com/v1",
+        description: "Cloud fallback option",
+      },
+    ]
 
-      try {
-        onStatusUpdate(`🔍 Testing connection to ${provider.name}...`)
-
-        // Simulate connection test based on provider type
-        if (provider.type === "local") {
-          // For local providers, try to fetch from endpoint
-          const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), connectionTimeout)
-
-          try {
-            const response = await fetch(provider.endpoint + "/health", {
-              method: "GET",
-              signal: controller.signal,
-              headers: {
-                "Content-Type": "application/json",
-              },
-            })
-            clearTimeout(timeoutId)
-
-            if (response.ok) {
-              const latency = Date.now() - startTime
-              setProviders((prev) =>
-                prev.map((p) =>
-                  p.id === provider.id ? { ...p, status: "connected", latency, lastPing: new Date() } : p,
-                ),
-              )
-              return true
-            }
-          } catch (error) {
-            clearTimeout(timeoutId)
-            // Connection failed
-          }
-        } else if (provider.type === "cloud") {
-          // For cloud providers, simulate API key validation
-          await new Promise((resolve) => setTimeout(resolve, 1000))
-
-          // Simulate success/failure based on random chance for demo
-          const success = Math.random() > 0.3
-          if (success) {
-            const latency = Date.now() - startTime
-            setProviders((prev) =>
-              prev.map((p) =>
-                p.id === provider.id ? { ...p, status: "connected", latency, lastPing: new Date() } : p,
-              ),
-            )
-            return true
-          }
-        }
-
-        // Connection failed
-        setProviders((prev) =>
-          prev.map((p) => (p.id === provider.id ? { ...p, status: "error", lastPing: new Date() } : p)),
-        )
-        return false
-      } catch (error) {
-        setProviders((prev) =>
-          prev.map((p) => (p.id === provider.id ? { ...p, status: "error", lastPing: new Date() } : p)),
-        )
-        return false
-      }
-    },
-    [connectionTimeout, onStatusUpdate],
-  )
+    setProviders(initialProviders)
+    scanProviders(initialProviders)
+  }, [])
 
   // Scan for available providers
-  const scanProviders = useCallback(async () => {
-    setIsScanning(true)
-    onStatusUpdate("🔍 Scanning for MCP providers...")
+  const scanProviders = useCallback(
+    async (providerList?: MCPProvider[]) => {
+      const providersToScan = providerList || providers
+      setIsScanning(true)
+      onStatusUpdate?.("🔍 Scanning for MCP providers...")
 
-    // Reset all provider statuses
-    setProviders((prev) => prev.map((p) => ({ ...p, status: "connecting" as const })))
+      // Simulate provider scanning
+      for (const provider of providersToScan) {
+        setProviders((prev) => prev.map((p) => (p.id === provider.id ? { ...p, status: "connecting" as const } : p)))
 
-    // Test each provider
-    const results = await Promise.allSettled(providers.map((provider) => testConnection(provider)))
+        await new Promise((resolve) => setTimeout(resolve, 1000))
 
-    // Find the first successful connection based on priority
-    const connectedProviders = providers
-      .filter(
-        (_, index) =>
-          results[index].status === "fulfilled" && (results[index] as PromiseFulfilledResult<boolean>).value,
-      )
-      .sort((a, b) => a.priority - b.priority)
+        // Simulate connection results
+        const isConnected = Math.random() > 0.6 // 40% success rate for demo
+        const latency = isConnected ? Math.floor(Math.random() * 200) + 50 : 0
 
-    if (connectedProviders.length > 0) {
-      const bestProvider = connectedProviders[0]
-      setActiveProvider(bestProvider)
-      onProviderChange(bestProvider)
-      onStatusUpdate(`✅ Connected to ${bestProvider.name} (${bestProvider.latency}ms)`)
-    } else {
-      setActiveProvider(null)
-      onProviderChange(null)
-      onStatusUpdate("❌ No MCP providers available")
-    }
+        setProviders((prev) =>
+          prev.map((p) =>
+            p.id === provider.id
+              ? {
+                  ...p,
+                  status: isConnected ? "connected" : "disconnected",
+                  latency,
+                }
+              : p,
+          ),
+        )
 
-    setIsScanning(false)
-  }, [providers, testConnection, onProviderChange, onStatusUpdate])
+        if (isConnected && !activeProvider) {
+          setActiveProvider(provider.id)
+          onProviderChange?.(provider.id)
+          onStatusUpdate?.(`✅ Connected to ${provider.name}`)
+        }
+      }
 
-  // Connect to specific provider
+      setIsScanning(false)
+
+      const connectedCount = providersToScan.filter(
+        (p) => providers.find((pr) => pr.id === p.id)?.status === "connected",
+      ).length
+
+      onStatusUpdate?.(`🔍 Scan complete: ${connectedCount}/${providersToScan.length} providers available`)
+    },
+    [providers, activeProvider, onProviderChange, onStatusUpdate],
+  )
+
+  // Connect to a specific provider
   const connectToProvider = useCallback(
-    async (provider: MCPProvider) => {
-      setProviders((prev) => prev.map((p) => (p.id === provider.id ? { ...p, status: "connecting" } : p)))
+    async (providerId: string) => {
+      const provider = providers.find((p) => p.id === providerId)
+      if (!provider) return
 
-      const success = await testConnection(provider)
+      setProviders((prev) => prev.map((p) => (p.id === providerId ? { ...p, status: "connecting" } : p)))
+
+      onStatusUpdate?.(`🔗 Connecting to ${provider.name}...`)
+
+      // Simulate connection
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+
+      const success = Math.random() > 0.3 // 70% success rate
+      const newStatus = success ? "connected" : "error"
+      const latency = success ? Math.floor(Math.random() * 200) + 50 : 0
+
+      setProviders((prev) => prev.map((p) => (p.id === providerId ? { ...p, status: newStatus, latency } : p)))
 
       if (success) {
-        setActiveProvider(provider)
-        onProviderChange(provider)
-        onStatusUpdate(`✅ Connected to ${provider.name}`)
+        setActiveProvider(providerId)
+        onProviderChange?.(providerId)
+        onStatusUpdate?.(`✅ Connected to ${provider.name} (${latency}ms)`)
       } else {
-        onStatusUpdate(`❌ Failed to connect to ${provider.name}`)
+        onStatusUpdate?.(`❌ Failed to connect to ${provider.name}`)
 
-        // Try fallback if enabled
+        // Auto fallback if enabled
         if (autoFallback) {
-          const fallbackProviders = providers
-            .filter((p) => p.id !== provider.id && p.status === "connected")
-            .sort((a, b) => a.fallbackOrder - b.fallbackOrder)
-
-          if (fallbackProviders.length > 0) {
-            const fallback = fallbackProviders[0]
-            setActiveProvider(fallback)
-            onProviderChange(fallback)
-            onStatusUpdate(`🔄 Switched to fallback: ${fallback.name}`)
+          const fallbackProvider = providers.find((p) => p.id !== providerId && p.status === "connected")
+          if (fallbackProvider) {
+            setActiveProvider(fallbackProvider.id)
+            onProviderChange?.(fallbackProvider.id)
+            onStatusUpdate?.(`🔄 Switched to fallback: ${fallbackProvider.name}`)
           }
         }
       }
     },
-    [testConnection, providers, autoFallback, onProviderChange, onStatusUpdate],
+    [providers, autoFallback, onProviderChange, onStatusUpdate],
   )
 
   // Disconnect from provider
   const disconnectProvider = useCallback(
     (providerId: string) => {
-      setProviders((prev) => prev.map((p) => (p.id === providerId ? { ...p, status: "disconnected" } : p)))
+      setProviders((prev) => prev.map((p) => (p.id === providerId ? { ...p, status: "disconnected", latency: 0 } : p)))
 
-      if (activeProvider?.id === providerId) {
+      if (activeProvider === providerId) {
         setActiveProvider(null)
-        onProviderChange(null)
-        onStatusUpdate("🔌 Disconnected from MCP provider")
+        onProviderChange?.(null)
+        onStatusUpdate?.("❌ Disconnected from MCP provider")
       }
     },
     [activeProvider, onProviderChange, onStatusUpdate],
   )
-
-  // Auto-scan on mount
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      scanProviders()
-    }, 1000)
-
-    return () => clearTimeout(timer)
-  }, [scanProviders])
-
-  // Periodic health checks
-  useEffect(() => {
-    if (activeProvider) {
-      const interval = setInterval(() => {
-        testConnection(activeProvider)
-      }, 30000) // Check every 30 seconds
-
-      return () => clearInterval(interval)
-    }
-  }, [activeProvider, testConnection])
 
   const getStatusIcon = (status: MCPProvider["status"]) => {
     switch (status) {
@@ -276,148 +199,158 @@ export function MCPManager({ onProviderChange, onStatusUpdate }: MCPManagerProps
   const getTypeIcon = (type: MCPProvider["type"]) => {
     switch (type) {
       case "local":
-        return <Server className="h-3 w-3 text-blue-400" />
+        return <Server className="h-4 w-4 text-blue-400" />
       case "cloud":
-        return <Globe className="h-3 w-3 text-purple-400" />
+        return <Globe className="h-4 w-4 text-purple-400" />
+      case "hybrid":
+        return <Database className="h-4 w-4 text-green-400" />
       default:
-        return <Wifi className="h-3 w-3 text-gray-400" />
+        return <Server className="h-4 w-4 text-gray-400" />
     }
   }
+
+  const connectedProviders = providers.filter((p) => p.status === "connected")
+  const activeProviderData = providers.find((p) => p.id === activeProvider)
 
   return (
     <Card className="bg-slate-800 border-slate-700">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm flex items-center gap-2 text-white">
-            <Server className="h-4 w-4" />
-            MCP Manager
-            {activeProvider && (
-              <Badge variant="outline" className="text-xs border-green-600 text-green-300">
-                {activeProvider.name}
-              </Badge>
-            )}
+            <Wifi className="h-4 w-4" />
+            MCP Manager ({connectedProviders.length})
           </CardTitle>
-          <Button size="sm" onClick={scanProviders} disabled={isScanning} className="h-7 bg-blue-600 hover:bg-blue-700">
-            {isScanning ? <RefreshCw className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+          <Button
+            size="sm"
+            onClick={() => scanProviders()}
+            disabled={isScanning}
+            className="h-7 bg-blue-600 hover:bg-blue-700"
+          >
+            {isScanning ? (
+              <RefreshCw className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
           </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Connection Settings */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label className="text-sm text-gray-300">Connection Timeout:</Label>
-            <Select
-              value={connectionTimeout.toString()}
-              onValueChange={(value) => setConnectionTimeout(Number.parseInt(value))}
-            >
-              <SelectTrigger className="h-8 bg-slate-700 border-slate-600">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="3000">3 seconds</SelectItem>
-                <SelectItem value="5000">5 seconds</SelectItem>
-                <SelectItem value="10000">10 seconds</SelectItem>
-                <SelectItem value="15000">15 seconds</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-sm text-gray-300">Auto Fallback:</Label>
-            <div className="flex items-center gap-2">
-              <Switch checked={autoFallback} onCheckedChange={setAutoFallback} />
-              <span className="text-xs text-gray-400">{autoFallback ? "Enabled" : "Disabled"}</span>
-            </div>
-          </div>
+        {/* Auto Fallback Toggle */}
+        <div className="flex items-center justify-between">
+          <Label className="text-sm text-gray-300">Auto Fallback:</Label>
+          <Switch
+            checked={autoFallback}
+            onCheckedChange={setAutoFallback}
+          />
         </div>
+
+        {/* Active Provider */}
+        {activeProviderData && (
+          <Alert className="bg-green-900/20 border-green-700">
+            <Zap className="h-4 w-4" />
+            <AlertDescription className="text-sm">
+              <strong>Active:</strong> {activeProviderData.name} ({activeProviderData.latency}ms)
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Providers List */}
         <div className="space-y-2">
           <Label className="text-sm text-gray-300">Available Providers:</Label>
-          <ScrollArea className="h-64">
+          <ScrollArea className="h-48">
             <div className="space-y-2">
               {providers.map((provider) => (
                 <div
                   key={provider.id}
-                  className={`border rounded-lg p-3 space-y-2 ${
-                    activeProvider?.id === provider.id
-                      ? "border-green-600 bg-green-900/20"
-                      : "border-slate-600 bg-slate-700/50"
+                  className={`border rounded p-3 space-y-2 ${
+                    activeProvider === provider.id
+                      ? "border-green-600 bg-green-900/10"
+                      : "border-slate-600"
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      {getStatusIcon(provider.status)}
                       {getTypeIcon(provider.type)}
-                      <span className="text-sm font-medium text-white">{provider.name}</span>
+                      <span className="text-sm font-medium text-white">
+                        {provider.name}
+                      </span>
                       <Badge variant="outline" className="text-xs border-slate-500 text-gray-300">
-                        v{provider.version}
+                        {provider.type}
                       </Badge>
                     </div>
-
                     <div className="flex items-center gap-2">
+                      {getStatusIcon(provider.status)}
                       {provider.status === "connected" && (
                         <Badge variant="secondary" className="text-xs">
                           {provider.latency}ms
                         </Badge>
                       )}
-                      <Badge
-                        variant="outline"
-                        className={`text-xs ${
-                          provider.priority === 1
-                            ? "border-yellow-500 text-yellow-300"
-                            : "border-slate-500 text-gray-300"
-                        }`}
-                      >
-                        P{provider.priority}
-                      </Badge>
                     </div>
                   </div>
 
-                  <div className="text-xs text-gray-400">{provider.endpoint}</div>
+                  <div className="text-xs text-gray-400">
+                    {provider.description}
+                  </div>
 
+                  <div className="text-xs text-gray-400">
+                    {provider.modelPath || provider.apiEndpoint}
+                  </div>
+
+                  {/* Capabilities */}
                   <div className="flex flex-wrap gap-1">
                     {provider.capabilities.map((capability) => (
-                      <Badge key={capability} variant="outline" className="text-xs border-slate-600 text-gray-400">
+                      <Badge
+                        key={capability}
+                        variant="outline"
+                        className="text-xs border-slate-600 text-slate-300"
+                      >
                         {capability}
                       </Badge>
                     ))}
                   </div>
 
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                      <Clock className="h-3 w-3" />
-                      Last ping: {provider.lastPing.toLocaleTimeString()}
-                    </div>
-
-                    <div className="flex gap-2">
-                      {provider.status === "connected" ? (
+                  {/* Actions */}
+                  <div className="flex gap-2">
+                    {provider.status === "connected" ? (
+                      <>
+                        {activeProvider !== provider.id && (
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setActiveProvider(provider.id)
+                              onProviderChange?.(provider.id)
+                            }}
+                            className="h-6 text-xs bg-blue-600 hover:bg-blue-700"
+                          >
+                            <Zap className="h-3 w-3 mr-1" />
+                            Activate
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => disconnectProvider(provider.id)}
                           className="h-6 text-xs border-slate-600"
                         >
-                          <XCircle className="h-3 w-3 mr-1" />
+                          <WifiOff className="h-3 w-3 mr-1" />
                           Disconnect
                         </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          onClick={() => connectToProvider(provider)}
-                          disabled={provider.status === "connecting"}
-                          className="h-6 text-xs bg-green-600 hover:bg-green-700"
-                        >
-                          {provider.status === "connecting" ? (
-                            <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
-                          ) : (
-                            <CheckCircle className="h-3 w-3 mr-1" />
-                          )}
-                          Connect
-                        </Button>
-                      )}
-                    </div>
+                      </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        onClick={() => connectToProvider(provider.id)}
+                        disabled={provider.status === "connecting"}
+                        className="h-6 text-xs bg-green-600 hover:bg-green-700"
+                      >
+                        {provider.status === "connecting" ? (
+                          <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Wifi className="h-3 w-3 mr-1" />
+                        )}
+                        Connect
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -426,24 +359,25 @@ export function MCPManager({ onProviderChange, onStatusUpdate }: MCPManagerProps
         </div>
 
         {/* Status Alert */}
-        <Alert className={`${activeProvider ? "bg-green-900/20 border-green-700" : "bg-red-900/20 border-red-700"}`}>
-          <Activity className="h-4 w-4" />
+        <Alert className={`${
+          connectedProviders.length > 0 
+            ? "bg-green-900/20 border-green-700" 
+            : "bg-red-900/20 border-red-700"
+        }`}>
+          <Server className="h-4 w-4" />
           <AlertDescription className="text-sm">
-            {activeProvider ? (
+            {connectedProviders.length > 0 ? (
               <>
-                <strong>Active Provider:</strong> {activeProvider.name} ({activeProvider.latency}ms latency)
-                <br />
-                <strong>Capabilities:</strong> {activeProvider.capabilities.join(", ")}
+                <strong>MCP Active:</strong> {connectedProviders.length} provider(s) connected
+                {autoFallback && " • Auto-fallback enabled"}
               </>
-            ) : (
-              <span>
-                <strong>No Active Provider:</strong> Connect to an MCP provider to enable AI features
-              </span>
+            ) : (\
+              <strong>No MCP Providers:</strong> Click scan to find available providers
             )}
           </AlertDescription>
         </Alert>
       </CardContent>
-    </Card>
+  </Card>
   )
 }
 

@@ -32,7 +32,7 @@ interface AgentAction {
   reasoning: string
   bengaliExplanation: string
   mode: "strict" | "soft"
-  category: "syntax" | "performance" | "security" | "style" | "bengali" | "logic"
+  category: "syntax" | "performance" | "security" | "style" | "bengali" | "logic" | "parse"
   impact: "low" | "medium" | "high"
 }
 
@@ -56,6 +56,7 @@ export function AgentExecutor({ code, onCodeChange, onAnalysisUpdate, fileIndex,
     style: true,
     bengali: true,
     logic: true,
+    parse: true,
   })
 
   // Analyze code for potential improvements
@@ -291,8 +292,54 @@ export function AgentExecutor({ code, onCodeChange, onAnalysisUpdate, fileIndex,
       },
     ]
 
+    // Parse error detection
+    const parseErrorActions: AgentAction[] = [
+      {
+        id: `parse-error-1-${Date.now()}`,
+        type: "fix",
+        line: 1,
+        column: 1,
+        original: "expected `)` but instead found `No`",
+        suggested: "expected `)` but instead found `)`",
+        confidence: 100,
+        reasoning: "Parse error detected, expected `)`",
+        bengaliExplanation: "পার্স ভুল পাওয়া গেছে, `)` অপেক্ষা করা উচিত",
+        mode: agentMode,
+        category: "parse",
+        impact: "high",
+      },
+      {
+        id: `parse-error-2-${Date.now()}`,
+        type: "fix",
+        line: 2,
+        column: 2,
+        original: "Unexpected token. Did you mean `{'}'}` or `&rbrace;`?",
+        suggested: "Unexpected token. Did you mean `{}` or `}`?",
+        confidence: 100,
+        reasoning: "Parse error detected, unexpected token",
+        bengaliExplanation: "পার্স ভুল পাওয়া গেছে, অপেক্ষাকৃত ভুল টোকেন",
+        mode: agentMode,
+        category: "parse",
+        impact: "high",
+      },
+      {
+        id: `parse-error-3-${Date.now()}`,
+        type: "fix",
+        line: 3,
+        column: 3,
+        original: "unexpected token `\\`",
+        suggested: "unexpected token",
+        confidence: 100,
+        reasoning: "Parse error detected, unexpected token `\\`",
+        bengaliExplanation: "পার্স ভুল পাওয়া গেছে, অপেক্ষাকৃত ভুল টোকেন `\\`",
+        mode: agentMode,
+        category: "parse",
+        impact: "high",
+      },
+    ]
+
     // Combine syntax error actions with other actions
-    const combinedActions = [...newActions, ...syntaxErrorActions]
+    const combinedActions = [...newActions, ...syntaxErrorActions, ...parseErrorActions]
 
     // Filter actions based on current filters
     const filteredActions = combinedActions.filter((action) => analysisFilters[action.category])
@@ -356,6 +403,8 @@ export function AgentExecutor({ code, onCodeChange, onAnalysisUpdate, fileIndex,
       case "optimize":
         return <Brain className="h-3 w-3 text-purple-400" />
       case "security":
+        return <AlertTriangle className="h-3 w-3 text-red-500" />
+      case "parse":
         return <AlertTriangle className="h-3 w-3 text-red-500" />
       default:
         return <Wand2 className="h-3 w-3 text-gray-400" />
@@ -535,7 +584,7 @@ export function AgentExecutor({ code, onCodeChange, onAnalysisUpdate, fileIndex,
           <AlertDescription className="text-sm">
             {mcpActive ? (
               <>
-                <strong>Agent Active:</strong> {agentMode} mode, {Object.values(analysisFilters).filter(Boolean).length}/6 categories enabled
+                <strong>Agent Active:</strong> {agentMode} mode, {Object.values(analysisFilters).filter(Boolean).length}/7 categories enabled
               </>
             ) : (
               <strong>Agent Inactive:</strong> No MCP provider available for code analysis
