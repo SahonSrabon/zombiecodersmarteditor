@@ -401,5 +401,3 @@ console.log("ফলাফল:", result); // ফলাফল: 8`
     </Card>
   )
 }
-
-export default BengaliVoiceSystem

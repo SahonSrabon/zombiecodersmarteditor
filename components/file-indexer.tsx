@@ -387,5 +387,3 @@ export function FileIndexer({ onIndexUpdate, onStatusUpdate }: FileIndexerProps)
     </Card>
   )
 }
-
-export default FileIndexer

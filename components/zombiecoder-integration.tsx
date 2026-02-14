@@ -477,5 +477,3 @@ export function ZombieCoderIntegration({
     </Card>
   )
 }
-
-export default ZombieCoderIntegration

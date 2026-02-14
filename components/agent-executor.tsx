@@ -595,5 +595,3 @@ export function AgentExecutor({ code, onCodeChange, onAnalysisUpdate, fileIndex,
     </Card>
   )
 }
-
-export default AgentExecutor

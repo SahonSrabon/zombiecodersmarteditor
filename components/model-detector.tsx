@@ -459,8 +459,6 @@ export function ModelDetector({ onModelChange, onStatusUpdate }: ModelDetectorPr
           </AlertDescription>
         </Alert>
       </CardContent>
-  </Card>
+    </Card>
   )
 }
-
-export default ModelDetector

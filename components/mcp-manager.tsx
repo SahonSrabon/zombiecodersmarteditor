@@ -380,5 +380,3 @@ export function MCPManager({ onProviderChange, onStatusUpdate }: MCPManagerProps
   </Card>
   )
 }
-
-export default MCPManager
