@@ -5,551 +5,395 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Slider } from "@/components/ui/slider"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  Mic,
-  Volume2,
-  VolumeX,
-  Square,
-  Languages,
-  AudioWaveformIcon as Waveform,
-  MessageSquare,
-  Clock,
-  CheckCircle,
-} from "lucide-react"
+import { Progress } from "@/components/ui/progress"
+import { Mic, Volume2, VolumeX, Play, Pause, Square, RefreshCw, MessageSquare, Code, CheckSquare } from "lucide-react"
 
 interface VoiceCommand {
   id: string
-  bengali: string
-  english: string
-  action: string
-  confidence: number
   timestamp: Date
-  executed: boolean
-  response?: string
-}
-
-interface VoiceSettings {
-  language: "bn-BD" | "en-US"
-  volume: number
-  speed: number
-  pitch: number
-  noiseReduction: boolean
-  autoExecute: boolean
-  confidenceThreshold: number
+  bengaliText: string
+  englishTranslation: string
+  codeGenerated?: string
+  confidence: number
+  type: "code-generation" | "code-modification" | "question" | "instruction" | "todo" | "task"
+  processed: boolean
 }
 
 interface BengaliVoiceSystemProps {
-  onVoiceCommand: (command: VoiceCommand) => void
-  onStatusUpdate: (message: string) => void
-  onCodeGenerate: (code: string) => void
+  onVoiceCommand?: (command: VoiceCommand) => void
+  onStatusUpdate?: (message: string) => void
+  onCodeGenerate?: (code: string) => void
 }
 
 export function BengaliVoiceSystem({ onVoiceCommand, onStatusUpdate, onCodeGenerate }: BengaliVoiceSystemProps) {
   const [isRecording, setIsRecording] = useState(false)
-  const [isPlaying, setIsPlaying] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
   const [voiceCommands, setVoiceCommands] = useState<VoiceCommand[]>([])
-  const [audioLevel, setAudioLevel] = useState(0)
-  const [isListening, setIsListening] = useState(false)
-  const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>({
-    language: "bn-BD",
-    volume: 80,
-    speed: 1.0,
-    pitch: 1.0,
-    noiseReduction: true,
-    autoExecute: false,
-    confidenceThreshold: 70,
-  })
+  const [voiceEnabled, setVoiceEnabled] = useState(true)
+  const [speechEnabled, setSpeechEnabled] = useState(true)
+  const [recordingLevel, setRecordingLevel] = useState(0)
+  const [currentPlayback, setCurrentPlayback] = useState<string | null>(null)
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const analyserRef = useRef<AnalyserNode | null>(null)
-  const speechSynthesisRef = useRef<SpeechSynthesisUtterance | null>(null)
+  const recordingRef = useRef<number | null>(null)
 
-  // Bengali voice command templates
-  const commandTemplates = [
-    { bengali: "কোড লিখো", english: "write code", action: "generate_code" },
-    { bengali: "ফাংশন বানাও", english: "create function", action: "create_function" },
-    { bengali: "ভেরিয়েবল ডিক্লেয়ার করো", english: "declare variable", action: "declare_variable" },
-    { bengali: "কমেন্ট যোগ করো", english: "add comment", action: "add_comment" },
-    { bengali: "ইমপোর্ট করো", english: "import module", action: "import_module" },
-    { bengali: "এক্সপোর্ট করো", english: "export function", action: "export_function" },
-    { bengali: "লুপ বানাও", english: "create loop", action: "create_loop" },
-    { bengali: "কন্ডিশন চেক করো", english: "add condition", action: "add_condition" },
-    { bengali: "ক্লাস বানাও", english: "create class", action: "create_class" },
-    { bengali: "অবজেক্ট বানাও", english: "create object", action: "create_object" },
-    { bengali: "সেভ করো", english: "save file", action: "save_file" },
-    { bengali: "রান করো", english: "run code", action: "run_code" },
-    { bengali: "ডিবাগ করো", english: "debug code", action: "debug_code" },
-    { bengali: "ফরম্যাট করো", english: "format code", action: "format_code" },
-    { bengali: "ট্রান্সলেট করো", english: "translate text", action: "translate" },
+  // Bengali voice commands examples
+  const sampleCommands = [
+    {
+      bengali: "একটা ফাংশন বানাও যা দুইটা সংখ্যা যোগ করে",
+      english: "Create a function that adds two numbers",
+      type: "code-generation" as const,
+    },
+    {
+      bengali: "এই কোডটি ব্যাখ্যা করো",
+      english: "Explain this code",
+      type: "question" as const,
+    },
+    {
+      bengali: "একটা টাস্ক যোগ করো: কোড রিভিউ করতে হবে",
+      english: "Add a task: Need to review code",
+      type: "task" as const,
+    },
+    {
+      bengali: "বাংলা কমেন্ট যোগ করো",
+      english: "Add Bengali comments",
+      type: "code-modification" as const,
+    },
   ]
 
-  // Initialize audio context and media recorder
-  const initializeAudio = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: voiceSettings.noiseReduction,
-          autoGainControl: true,
-        },
-      })
+  // Start voice recording
+  const startRecording = useCallback(() => {
+    if (!voiceEnabled) return
 
-      // Create audio context for visualization
-      audioContextRef.current = new AudioContext()
-      analyserRef.current = audioContextRef.current.createAnalyser()
-      const source = audioContextRef.current.createMediaStreamSource(stream)
-      source.connect(analyserRef.current)
+    setIsRecording(true)
+    setRecordingLevel(0)
+    onStatusUpdate?.("🎙️ Recording started... Speak in Bengali")
 
-      // Create media recorder
-      mediaRecorderRef.current = new MediaRecorder(stream)
+    // Simulate recording level animation
+    recordingRef.current = window.setInterval(() => {
+      setRecordingLevel(Math.random() * 100)
+    }, 100)
 
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          // Process audio data for speech recognition
-          processAudioData(event.data)
-        }
+    // Auto-stop after 10 seconds
+    setTimeout(() => {
+      if (recordingRef.current) {
+        stopRecording()
       }
+    }, 10000)
+  }, [voiceEnabled, onStatusUpdate])
 
-      onStatusUpdate("🎙️ Voice system initialized")
-      return true
-    } catch (error) {
-      onStatusUpdate("❌ Failed to initialize voice system: " + error)
-      return false
+  // Stop voice recording
+  const stopRecording = useCallback(async () => {
+    if (!isRecording) return
+
+    setIsRecording(false)
+    setRecordingLevel(0)
+    setIsProcessing(true)
+
+    if (recordingRef.current) {
+      clearInterval(recordingRef.current)
+      recordingRef.current = null
     }
-  }, [voiceSettings.noiseReduction, onStatusUpdate])
 
-  // Process audio data for speech recognition
-  const processAudioData = useCallback(
-    async (audioBlob: Blob) => {
-      try {
-        // Simulate speech recognition processing
-        onStatusUpdate("🔍 Processing voice input...")
+    onStatusUpdate?.("🔄 Processing Bengali voice command...")
 
-        // Simulate processing delay
-        await new Promise((resolve) => setTimeout(resolve, 1500))
+    // Simulate voice processing
+    await new Promise((resolve) => setTimeout(resolve, 2000))
 
-        // Simulate Bengali speech recognition results
-        const mockRecognitionResults = [
-          { text: "কোড লিখো একটা ফাংশন", confidence: 85 },
-          { text: "ভেরিয়েবল ডিক্লেয়ার করো নাম দিয়ে", confidence: 78 },
-          { text: "লুপ বানাও দশ বার চালানোর জন্য", confidence: 92 },
-          { text: "কমেন্ট যোগ করো এই লাইনে", confidence: 88 },
-          { text: "ইমপোর্ট করো রিয়েক্ট লাইব্রেরি", confidence: 95 },
-        ]
+    // Generate a random sample command
+    const randomCommand = sampleCommands[Math.floor(Math.random() * sampleCommands.length)]
 
-        const randomResult = mockRecognitionResults[Math.floor(Math.random() * mockRecognitionResults.length)]
+    const newCommand: VoiceCommand = {
+      id: `voice-${Date.now()}`,
+      timestamp: new Date(),
+      bengaliText: randomCommand.bengali,
+      englishTranslation: randomCommand.english,
+      confidence: Math.floor(Math.random() * 20) + 80, // 80-100%
+      type: randomCommand.type,
+      processed: false,
+    }
 
-        // Find matching command template
-        const matchedTemplate = commandTemplates.find((template) => randomResult.text.includes(template.bengali))
+    // Generate code if it's a code generation command
+    if (newCommand.type === "code-generation") {
+      const generatedCode = `// ${newCommand.bengaliText}
+function addNumbers(a, b) {
+  // দুইটি সংখ্যা যোগ করার ফাংশন
+  return a + b;
+}
 
-        if (matchedTemplate && randomResult.confidence >= voiceSettings.confidenceThreshold) {
-          const command: VoiceCommand = {
-            id: `cmd-${Date.now()}`,
-            bengali: randomResult.text,
-            english: matchedTemplate.english,
-            action: matchedTemplate.action,
-            confidence: randomResult.confidence,
-            timestamp: new Date(),
-            executed: false,
-          }
+// ব্যবহারের উদাহরণ
+const result = addNumbers(5, 3);
+console.log("ফলাফল:", result); // ফলাফল: 8`
 
-          setVoiceCommands((prev) => [command, ...prev.slice(0, 19)]) // Keep last 20 commands
-          onVoiceCommand(command)
+      newCommand.codeGenerated = generatedCode
+      onCodeGenerate?.(generatedCode)
+    }
 
-          // Auto-execute if enabled and confidence is high
-          if (voiceSettings.autoExecute && randomResult.confidence >= 85) {
-            executeVoiceCommand(command)
-          }
+    setVoiceCommands((prev) => [newCommand, ...prev.slice(0, 9)]) // Keep last 10
+    setIsProcessing(false)
 
-          onStatusUpdate(`✅ Voice command recognized: ${command.bengali} (${command.confidence}%)`)
-        } else {
-          onStatusUpdate(`❌ Voice command not recognized or low confidence (${randomResult.confidence}%)`)
-        }
-      } catch (error) {
-        onStatusUpdate("❌ Error processing voice input: " + error)
-      }
-    },
-    [commandTemplates, voiceSettings.confidenceThreshold, voiceSettings.autoExecute, onVoiceCommand, onStatusUpdate],
-  )
+    onVoiceCommand?.(newCommand)
+    onStatusUpdate?.(`✅ Voice command processed: ${newCommand.bengaliText}`)
 
-  // Execute voice command
-  const executeVoiceCommand = useCallback(
-    (command: VoiceCommand) => {
-      let generatedCode = ""
-      let response = ""
+    // Text-to-speech if enabled
+    if (speechEnabled) {
+      speakText(`আপনার কমান্ড প্রসেস করা হয়েছে: ${newCommand.englishTranslation}`)
+    }
+  }, [isRecording, onVoiceCommand, onStatusUpdate, onCodeGenerate, speechEnabled])
 
-      switch (command.action) {
-        case "generate_code":
-          generatedCode = `// Generated from voice command: ${command.bengali}
-function generatedFunction() {
-  console.log("Hello from voice command!");
-  return "Generated code";
-}`
-          response = "কোড জেনারেট করা হয়েছে"
-          break
-
-        case "create_function":
-          generatedCode = `// Function created from voice: ${command.bengali}
-function myFunction() {
-  // TODO: Implement function logic
-  return true;
-}`
-          response = "ফাংশন তৈরি করা হয়েছে"
-          break
-
-        case "declare_variable":
-          generatedCode = `// Variable declared from voice: ${command.bengali}
-const myVariable = "Hello World";
-let counter = 0;`
-          response = "ভেরিয়েবল ডিক্লেয়ার করা হয়েছে"
-          break
-
-        case "add_comment":
-          generatedCode = `// Comment added from voice: ${command.bengali}
-// এই কোডটি ভয়েস কমান্ড থেকে তৈরি
-// This code was generated from voice command`
-          response = "কমেন্ট যোগ করা হয়েছে"
-          break
-
-        case "create_loop":
-          generatedCode = `// Loop created from voice: ${command.bengali}
-for (let i = 0; i < 10; i++) {
-  console.log("Iteration: " + i);
-}`
-          response = "লুপ তৈরি করা হয়েছে"
-          break
-
-        case "add_condition":
-          generatedCode = `// Condition added from voice: ${command.bengali}
-if (condition) {
-  // True case
-  console.log("Condition is true");
-} else {
-  // False case
-  console.log("Condition is false");
-}`
-          response = "কন্ডিশন যোগ করা হয়েছে"
-          break
-
-        default:
-          response = "কমান্ড এক্সিকিউট করা হয়েছে"
-          break
-      }
-
-      // Update command as executed
-      setVoiceCommands((prev) =>
-        prev.map((cmd) => (cmd.id === command.id ? { ...cmd, executed: true, response } : cmd)),
-      )
-
-      // Generate code if applicable
-      if (generatedCode) {
-        onCodeGenerate(generatedCode)
-      }
-
-      // Speak response in Bengali
-      speakText(response, "bn-BD")
-
-      onStatusUpdate(`⚡ Executed: ${command.bengali}`)
-    },
-    [onCodeGenerate, onStatusUpdate],
-  )
-
-  // Text-to-speech function
+  // Text-to-speech
   const speakText = useCallback(
-    (text: string, language: string = voiceSettings.language) => {
-      if ("speechSynthesis" in window) {
-        // Cancel any ongoing speech
-        speechSynthesis.cancel()
+    (text: string) => {
+      if (!speechEnabled) return
 
-        const utterance = new SpeechSynthesisUtterance(text)
-        utterance.lang = language
-        utterance.volume = voiceSettings.volume / 100
-        utterance.rate = voiceSettings.speed
-        utterance.pitch = voiceSettings.pitch
+      // Simulate text-to-speech
+      onStatusUpdate?.(`🔊 Speaking: ${text.slice(0, 30)}...`)
 
-        utterance.onstart = () => setIsPlaying(true)
-        utterance.onend = () => setIsPlaying(false)
-        utterance.onerror = () => {
-          setIsPlaying(false)
-          onStatusUpdate("❌ Text-to-speech error")
-        }
-
-        speechSynthesisRef.current = utterance
-        speechSynthesis.speak(utterance)
-      }
+      // In a real implementation, you would use Web Speech API or a Bengali TTS service
+      setTimeout(() => {
+        onStatusUpdate?.("🔊 Speech completed")
+      }, 2000)
     },
-    [voiceSettings, onStatusUpdate],
+    [speechEnabled, onStatusUpdate],
   )
 
-  // Start recording
-  const startRecording = useCallback(async () => {
-    if (!mediaRecorderRef.current) {
-      const initialized = await initializeAudio()
-      if (!initialized) return
-    }
+  // Play voice command
+  const playCommand = useCallback(
+    (commandId: string) => {
+      const command = voiceCommands.find((c) => c.id === commandId)
+      if (!command) return
 
-    try {
-      setIsRecording(true)
-      setIsListening(true)
-      mediaRecorderRef.current?.start(1000) // Record in 1-second chunks
+      setCurrentPlayback(commandId)
+      speakText(command.bengaliText)
 
-      // Start audio level monitoring
-      const monitorAudio = () => {
-        if (analyserRef.current && isRecording) {
-          const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount)
-          analyserRef.current.getByteFrequencyData(dataArray)
-          const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length
-          setAudioLevel(average)
-          requestAnimationFrame(monitorAudio)
-        }
+      setTimeout(() => {
+        setCurrentPlayback(null)
+      }, 3000)
+    },
+    [voiceCommands, speakText],
+  )
+
+  // Process command (execute the action)
+  const processCommand = useCallback(
+    (commandId: string) => {
+      setVoiceCommands((prev) => prev.map((cmd) => (cmd.id === commandId ? { ...cmd, processed: true } : cmd)))
+
+      const command = voiceCommands.find((c) => c.id === commandId)
+      if (command) {
+        onStatusUpdate?.(`⚡ Executed: ${command.englishTranslation}`)
       }
-      monitorAudio()
+    },
+    [voiceCommands, onStatusUpdate],
+  )
 
-      onStatusUpdate("🎙️ Recording started - speak in Bengali")
-    } catch (error) {
-      setIsRecording(false)
-      setIsListening(false)
-      onStatusUpdate("❌ Failed to start recording: " + error)
+  const getCommandIcon = (type: VoiceCommand["type"]) => {
+    switch (type) {
+      case "code-generation":
+      case "code-modification":
+        return <Code className="h-4 w-4 text-blue-400" />
+      case "question":
+        return <MessageSquare className="h-4 w-4 text-green-400" />
+      case "task":
+      case "todo":
+        return <CheckSquare className="h-4 w-4 text-purple-400" />
+      default:
+        return <Mic className="h-4 w-4 text-gray-400" />
     }
-  }, [initializeAudio, isRecording, onStatusUpdate])
-
-  // Stop recording
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop()
-      setIsRecording(false)
-      setIsListening(false)
-      setAudioLevel(0)
-      onStatusUpdate("⏹️ Recording stopped")
-    }
-  }, [isRecording, onStatusUpdate])
-
-  // Stop text-to-speech
-  const stopSpeaking = useCallback(() => {
-    if ("speechSynthesis" in window) {
-      speechSynthesis.cancel()
-      setIsPlaying(false)
-      onStatusUpdate("🔇 Speech stopped")
-    }
-  }, [onStatusUpdate])
-
-  // Quick command buttons
-  const quickCommands = [
-    { bengali: "কোড লিখো", english: "Write code" },
-    { bengali: "ফাংশন বানাও", english: "Create function" },
-    { bengali: "সেভ করো", english: "Save file" },
-    { bengali: "রান করো", english: "Run code" },
-  ]
+  }
 
   return (
     <Card className="bg-slate-800 border-slate-700">
       <CardHeader className="pb-3">
         <CardTitle className="text-sm flex items-center gap-2 text-white">
           <Mic className="h-4 w-4" />
-          Bengali Voice System
-          {isListening && (
-            <Badge variant="outline" className="text-xs border-green-600 text-green-300 animate-pulse">
-              Listening
-            </Badge>
-          )}
+          Bengali Voice System ({voiceCommands.length})
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Voice Controls */}
-        <div className="flex items-center justify-center gap-4">
-          <Button
-            size="lg"
-            onClick={isRecording ? stopRecording : startRecording}
-            className={`h-12 w-12 rounded-full ${
-              isRecording ? "bg-red-600 hover:bg-red-700 animate-pulse" : "bg-green-600 hover:bg-green-700"
-            }`}
-          >
-            {isRecording ? <Square className="h-6 w-6" /> : <Mic className="h-6 w-6" />}
-          </Button>
-
-          <Button
-            size="lg"
-            onClick={isPlaying ? stopSpeaking : () => speakText("আমি আপনার বাংলা ভয়েস সহায়ক")}
-            disabled={!("speechSynthesis" in window)}
-            className={`h-12 w-12 rounded-full ${
-              isPlaying ? "bg-orange-600 hover:bg-orange-700" : "bg-blue-600 hover:bg-blue-700"
-            }`}
-          >
-            {isPlaying ? <VolumeX className="h-6 w-6" /> : <Volume2 className="h-6 w-6" />}
-          </Button>
-        </div>
-
-        {/* Audio Level Indicator */}
-        {isRecording && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm text-gray-300">Audio Level:</Label>
-              <span className="text-xs text-gray-400">{Math.round(audioLevel)}</span>
-            </div>
-            <Progress value={audioLevel} className="h-2" />
-          </div>
-        )}
-
-        {/* Voice Settings */}
         <div className="space-y-3">
-          <Label className="text-sm text-gray-300">Voice Settings:</Label>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="text-xs text-gray-400">Language:</Label>
-              <Select
-                value={voiceSettings.language}
-                onValueChange={(value: "bn-BD" | "en-US") => setVoiceSettings((prev) => ({ ...prev, language: value }))}
-              >
-                <SelectTrigger className="h-8 bg-slate-700 border-slate-600">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="bn-BD">🇧🇩 Bengali</SelectItem>
-                  <SelectItem value="en-US">🇺🇸 English</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-xs text-gray-400">Volume: {voiceSettings.volume}%</Label>
-              <Slider
-                value={[voiceSettings.volume]}
-                onValueChange={([value]) => setVoiceSettings((prev) => ({ ...prev, volume: value }))}
-                max={100}
-                step={10}
-                className="h-2"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="text-xs text-gray-400">Speed: {voiceSettings.speed}x</Label>
-              <Slider
-                value={[voiceSettings.speed]}
-                onValueChange={([value]) => setVoiceSettings((prev) => ({ ...prev, speed: value }))}
-                min={0.5}
-                max={2.0}
-                step={0.1}
-                className="h-2"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-xs text-gray-400">Confidence: {voiceSettings.confidenceThreshold}%</Label>
-              <Slider
-                value={[voiceSettings.confidenceThreshold]}
-                onValueChange={([value]) => setVoiceSettings((prev) => ({ ...prev, confidenceThreshold: value }))}
-                min={50}
-                max={95}
-                step={5}
-                className="h-2"
-              />
-            </div>
-          </div>
-
           <div className="flex items-center justify-between">
-            <Label className="text-sm text-gray-300">Auto Execute:</Label>
+            <Label className="text-sm text-gray-300">Voice Input:</Label>
             <Switch
-              checked={voiceSettings.autoExecute}
-              onCheckedChange={(checked) => setVoiceSettings((prev) => ({ ...prev, autoExecute: checked }))}
+              checked={voiceEnabled}
+              onCheckedChange={setVoiceEnabled}
+            />
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <Label className="text-sm text-gray-300">Speech Output:</Label>
+            <Switch
+              checked={speechEnabled}
+              onCheckedChange={setSpeechEnabled}
             />
           </div>
         </div>
 
-        {/* Quick Commands */}
-        <div className="space-y-2">
-          <Label className="text-sm text-gray-300">Quick Commands:</Label>
-          <div className="grid grid-cols-2 gap-2">
-            {quickCommands.map((cmd, index) => (
-              <Button
-                key={index}
-                size="sm"
-                variant="outline"
-                onClick={() => speakText(cmd.bengali)}
-                className="h-8 text-xs border-slate-600 bg-slate-700/50"
-              >
-                <Languages className="h-3 w-3 mr-1" />
-                {cmd.bengali}
-              </Button>
-            ))}
+        {/* Recording Interface */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-center">
+            <Button
+              size="lg"
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={!voiceEnabled || isProcessing}
+              className={`w-20 h-20 rounded-full ${
+                isRecording 
+                  ? "bg-red-600 hover:bg-red-700 animate-pulse" 
+                  : "bg-blue-600 hover:bg-blue-700"
+              }`}
+            >
+              {isProcessing ? (
+                <RefreshCw className="h-8 w-8 animate-spin" />
+              ) : isRecording ? (
+                <Square className="h-8 w-8" />
+              ) : (
+                <Mic className="h-8 w-8" />
+              )}
+            </Button>
+          </div>
+
+          {/* Recording Level */}
+          {isRecording && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-300">Recording Level</span>
+                <span className="text-gray-400">{Math.round(recordingLevel)}%</span>
+              </div>
+              <Progress value={recordingLevel} className="h-2" />
+            </div>
+          )}
+
+          {/* Status */}
+          <div className="text-center">
+            <Badge variant="outline" className={`${
+              isRecording 
+                ? "border-red-600 text-red-300" 
+                : isProcessing 
+                  ? "border-yellow-600 text-yellow-300"
+                  : "border-green-600 text-green-300"
+            }`}>
+              {isRecording 
+                ? "🎙️ Recording..." 
+                : isProcessing 
+                  ? "🔄 Processing..."
+                  : "✅ Ready"
+              }
+            </Badge>
           </div>
         </div>
 
-        {/* Command History */}
+        {/* Voice Commands History */}
         <div className="space-y-2">
-          <Label className="text-sm text-gray-300">Recent Commands ({voiceCommands.length}):</Label>
-          <ScrollArea className="h-32">
+          <Label className="text-sm text-gray-300">Recent Commands:</Label>
+          <ScrollArea className="h-48">
             <div className="space-y-2">
-              {voiceCommands.map((command) => (
-                <div key={command.id} className="border border-slate-600 rounded p-2 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {command.executed ? (
-                        <CheckCircle className="h-3 w-3 text-green-400" />
-                      ) : (
-                        <Clock className="h-3 w-3 text-yellow-400" />
-                      )}
-                      <span className="text-xs text-blue-300">{command.bengali}</span>
-                    </div>
-                    <Badge variant="secondary" className="text-xs">
-                      {command.confidence}%
-                    </Badge>
+              {voiceCommands.length === 0 ? (
+                <div className="text-center py-8">
+                  <Mic className="h-8 w-8 mx-auto mb-2 text-gray-500" />
+                  <div className="text-xs text-gray-400">
+                    No voice commands yet
                   </div>
-                  <div className="text-xs text-gray-400">{command.english}</div>
-                  {command.response && <div className="text-xs text-green-300">Response: {command.response}</div>}
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-500">{command.timestamp.toLocaleTimeString()}</span>
-                    {!command.executed && (
+                  <div className="text-xs text-gray-500 mt-1">
+                    Click the microphone to start
+                  </div>
+                </div>
+              ) : (
+                voiceCommands.map((command) => (
+                  <div
+                    key={command.id}
+                    className={`border rounded p-3 space-y-2 ${
+                      command.processed 
+                        ? "border-green-600 bg-green-900/10" 
+                        : "border-slate-600"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {getCommandIcon(command.type)}
+                        <Badge variant="outline" className="text-xs border-slate-500 text-gray-300">
+                          {command.type}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-xs">
+                          {command.confidence}%
+                        </Badge>
+                        <span className="text-xs text-gray-400">
+                          {command.timestamp.toLocaleTimeString()}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="text-sm text-blue-300 font-medium bengali-text">
+                        🇧🇩 {command.bengaliText}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        🇺🇸 {command.englishTranslation}
+                      </div>
+                    </div>
+
+                    {command.codeGenerated && (
+                      <div className="bg-slate-900 rounded p-2 text-xs font-mono">
+                        <div className="text-green-300">
+                          {command.codeGenerated.split('\n').slice(0, 3).join('\n')}
+                          {command.codeGenerated.split('\n').length > 3 && '...'}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
                       <Button
                         size="sm"
-                        onClick={() => executeVoiceCommand(command)}
-                        className="h-5 text-xs bg-green-600 hover:bg-green-700"
+                        onClick={() => playCommand(command.id)}
+                        disabled={currentPlayback === command.id}
+                        className="h-6 text-xs bg-purple-600 hover:bg-purple-700"
                       >
-                        Execute
+                        {currentPlayback === command.id ? (
+                          <Pause className="h-3 w-3 mr-1" />
+                        ) : (
+                          <Play className="h-3 w-3 mr-1" />
+                        )}
+                        Play
                       </Button>
-                    )}
+                      
+                      {!command.processed && (
+                        <Button
+                          size="sm"
+                          onClick={() => processCommand(command.id)}
+                          className="h-6 text-xs bg-green-600 hover:bg-green-700"
+                        >
+                          <CheckSquare className="h-3 w-3 mr-1" />
+                          Execute
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-
-              {voiceCommands.length === 0 && (
-                <div className="text-center py-4">
-                  <MessageSquare className="h-6 w-6 mx-auto mb-2 text-gray-500" />
-                  <div className="text-xs text-gray-400">No voice commands yet</div>
-                  <div className="text-xs text-gray-500 mt-1">Click the microphone to start recording</div>
-                </div>
+                ))
               )}
             </div>
           </ScrollArea>
         </div>
 
         {/* Status Alert */}
-        <Alert className={`${isListening ? "bg-green-900/20 border-green-700" : "bg-slate-900/20 border-slate-700"}`}>
-          <Waveform className="h-4 w-4" />
+        <Alert className={`${
+          voiceEnabled ? "bg-green-900/20 border-green-700" : "bg-red-900/20 border-red-700"
+        }`}>
+          {voiceEnabled ? (
+            <Volume2 className="h-4 w-4" />
+          ) : (
+            <VolumeX className="h-4 w-4" />
+          )}
           <AlertDescription className="text-sm">
-            {isListening ? (
+            {voiceEnabled ? (
               <>
-                <strong>Listening:</strong> Speak Bengali voice commands
-                <br />
-                <strong>Language:</strong> {voiceSettings.language === "bn-BD" ? "Bengali" : "English"}
-                <br />
-                <strong>Confidence Threshold:</strong> {voiceSettings.confidenceThreshold}%
+                <strong>Voice Active:</strong> Bengali speech recognition enabled
+                {speechEnabled && " • Text-to-speech enabled"}
               </>
             ) : (
-              <>
-                <strong>Voice System Ready:</strong> Click microphone to start voice commands
-                <br />
-                <strong>Supported:</strong> Bengali speech recognition and text-to-speech
-              </>
+              <strong>Voice Disabled:</strong> Enable voice input to use Bengali commands
             )}
           </AlertDescription>
         </Alert>
@@ -557,5 +401,3 @@ if (condition) {
     </Card>
   )
 }
-
-export default BengaliVoiceSystem
